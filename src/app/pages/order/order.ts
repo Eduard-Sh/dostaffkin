@@ -3,6 +3,7 @@ import { Header } from '../../header/header';
 import { DELIVERY_SIZES, DELIVERY_SPEEDS } from './order.config';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { UpperCasePipe } from '@angular/common';
+import { DeliveryApi } from '../../services/delivery-api';
 
 declare var ymaps: any;
 
@@ -25,7 +26,9 @@ export class Order {
   public orderId: any = signal(null);
   public calculationResult: any = signal(null);
 
-  constructor(private formBuilder: FormBuilder) {
+  public isCalculating = signal(false); // <--- добавлено состояние загрузки
+
+  constructor(private formBuilder: FormBuilder, private deliveryApi: DeliveryApi) {
     this.routeForm = this.formBuilder.group({
       from: ['', Validators.required],
       to: ['', Validators.required],
@@ -63,8 +66,10 @@ export class Order {
 
   public calculate() {
     this.calculationResult.set(null);
+    this.isCalculating.set(true); // <--- показываем лоадер
 
     if (!this.map || this.routeForm.invalid) {
+      this.isCalculating.set(false); // <--- скрываем лоадер при ошибке
       return;
     }
 
@@ -85,6 +90,7 @@ export class Order {
       try {
         const activeRoute = this.mapRoute.getActiveRoute();
         if (!activeRoute) {
+          this.isCalculating.set(false); // <--- скрываем лоадер при ошибке
           return this.failedCalculation();
         }
 
@@ -92,6 +98,7 @@ export class Order {
         const sizeValue = size ?? '';
         const sizeConfig = this.sizes.find((item) => item.value === sizeValue);
         if (!sizeConfig) {
+          this.isCalculating.set(false); // <--- скрываем лоадер при ошибке
           return this.failedCalculation();
         }
         let total = Math.max(sizeConfig.min, Math.ceil(km * sizeConfig.rate));
@@ -113,11 +120,17 @@ export class Order {
           speed
         });
       } catch (err) {
+        this.isCalculating.set(false); // <--- скрываем лоадер при ошибке
         this.failedCalculation();
+        return;
       }
+      this.isCalculating.set(false); // <--- скрываем лоадер после успеха
     });
 
-    this.mapRoute.model.events.add('requestfail', () => this.failedCalculation());
+    this.mapRoute.model.events.add('requestfail', () => {
+      this.isCalculating.set(false); // <--- скрываем лоадер при ошибке
+      this.failedCalculation();
+    });
   }
 
   private failedCalculation() {
@@ -148,8 +161,15 @@ export class Order {
       createdAt: new Date().toISOString()
     };
 
-    console.log(payload);
-    this.orderId.set(1);
+    this.deliveryApi.createDelivery(payload).subscribe((response) => {
+      if ('error' in response) {
+        alert(response.error);
+        return;
+      }
+
+      this.orderId.set(response.id);
+    });
+
   }
 
 }
